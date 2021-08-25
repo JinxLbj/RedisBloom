@@ -33,7 +33,7 @@ static int GetCMSKey(RedisModuleCtx *ctx, RedisModuleString *keyName, CMSketch *
 }
 
 static int parseCreateArgs(RedisModuleCtx *ctx, RedisModuleString **argv, int argc,
-                           long long *width, long long *depth) {
+                           long long *width, long long *depth, long long *max) {
 
     size_t cmdlen;
     const char *cmd = RedisModule_StringPtrLen(argv[0], &cmdlen);
@@ -43,6 +43,9 @@ static int parseCreateArgs(RedisModuleCtx *ctx, RedisModuleString **argv, int ar
         }
         if ((RedisModule_StringToLongLong(argv[3], depth) != REDISMODULE_OK) || *depth < 1) {
             INNER_ERROR("CMS: invalid depth");
+        }
+        if ((RedisModule_StringToLongLong(argv[4], max) != REDISMODULE_OK) || *max < 1) {
+            INNER_ERROR("CMS: invalid max");
         }
     } else {
         double overEst = 0, prob = 0;
@@ -54,6 +57,9 @@ static int parseCreateArgs(RedisModuleCtx *ctx, RedisModuleString **argv, int ar
             prob >= 1) {
             INNER_ERROR("CMS: invalid prob value");
         }
+        if ((RedisModule_StringToLongLong(argv[4], max) != REDISMODULE_OK) || *max < 1) {
+            INNER_ERROR("CMS: invalid max");
+        }
         CMS_DimFromProb(overEst, prob, (size_t *)width, (size_t *)depth);
     }
 
@@ -62,12 +68,12 @@ static int parseCreateArgs(RedisModuleCtx *ctx, RedisModuleString **argv, int ar
 
 int CMSketch_Create(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
     RedisModule_AutoMemory(ctx);
-    if (argc != 4) {
+    if (argc != 5) {
         return RedisModule_WrongArity(ctx);
     }
 
     CMSketch *cms = NULL;
-    long long width = 0, depth = 0;
+    long long width = 0, depth = 0, max = 0;
     RedisModuleString *keyName = argv[1];
     RedisModuleKey *key = RedisModule_OpenKey(ctx, keyName, REDISMODULE_READ | REDISMODULE_WRITE);
 
@@ -76,10 +82,10 @@ int CMSketch_Create(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
         return RedisModule_ReplyWithError(ctx, "CMS: key already exists");
     }
 
-    if (parseCreateArgs(ctx, argv, argc, &width, &depth) != REDISMODULE_OK)
+    if (parseCreateArgs(ctx, argv, argc, &width, &depth, &max) != REDISMODULE_OK)
         return REDISMODULE_OK;
 
-    cms = NewCMSketch(width, depth);
+    cms = NewCMSketch(width, depth, max);
     RedisModule_ModuleTypeSetValue(key, CMSketchType, cms);
 
     RedisModule_CloseKey(key);
@@ -251,6 +257,8 @@ int CMSKetch_Info(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
     RedisModule_ReplyWithLongLong(ctx, cms->width);
     RedisModule_ReplyWithSimpleString(ctx, "depth");
     RedisModule_ReplyWithLongLong(ctx, cms->depth);
+    RedisModule_ReplyWithSimpleString(ctx, "num_use_bit");
+    RedisModule_ReplyWithLongLong(ctx, cms->num_use_bit);
     RedisModule_ReplyWithSimpleString(ctx, "count");
     RedisModule_ReplyWithLongLong(ctx, cms->counter);
 
@@ -261,9 +269,10 @@ void CMSRdbSave(RedisModuleIO *io, void *obj) {
     CMSketch *cms = obj;
     RedisModule_SaveUnsigned(io, cms->width);
     RedisModule_SaveUnsigned(io, cms->depth);
+    RedisModule_SaveUnsigned(io, cms->num_use_bit);
     RedisModule_SaveUnsigned(io, cms->counter);
     RedisModule_SaveStringBuffer(io, (const char *)cms->array,
-                                 cms->width * cms->depth * sizeof(uint32_t));
+                                 cms->width * cms->depth * cms -> num_use_bit * sizeof(uint8_t));
 }
 
 void *CMSRdbLoad(RedisModuleIO *io, int encver) {
@@ -274,9 +283,10 @@ void *CMSRdbLoad(RedisModuleIO *io, int encver) {
     CMSketch *cms = CMS_CALLOC(1, sizeof(CMSketch));
     cms->width = RedisModule_LoadUnsigned(io);
     cms->depth = RedisModule_LoadUnsigned(io);
+    cms->num_use_bit = RedisModule_LoadUnsigned(io);
     cms->counter = RedisModule_LoadUnsigned(io);
-    size_t length = cms->width * cms->depth * sizeof(size_t);
-    cms->array = (uint32_t *)RedisModule_LoadStringBuffer(io, &length);
+    size_t length = cms->width * cms->depth * cms -> num_use_bit * sizeof(uint8_t);
+    cms->array = (uint8_t *)RedisModule_LoadStringBuffer(io, &length);
 
     return cms;
 }

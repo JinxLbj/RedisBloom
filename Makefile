@@ -46,6 +46,7 @@ MODULE_LDFLAGS = -lm -lc -L$(LIBTDIGEST_LIBDIR) -ltdigest_static
 
 DEPS = $(ROOT)/contrib/MurmurHash2.o \
 	   $(ROOT)/rmutil/util.o \
+	   $(ROOT)/bit/bit.o \
 	   $(SRCDIR)/sb.o \
 	   $(SRCDIR)/cf.o \
 	   $(SRCDIR)/rm_topk.o \
@@ -56,6 +57,7 @@ DEPS = $(ROOT)/contrib/MurmurHash2.o \
 
 DEPS_TEST = $(ROOT)/contrib/MurmurHash2.o \
 	   $(ROOT)/rmutil/util.o \
+	   $(ROOT)/bit/bit.o \
 	   $(SRCDIR)/sb.o \
 	   $(SRCDIR)/cf.o \
 	   $(SRCDIR)/rm_topk.o \

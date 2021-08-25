@@ -16,7 +16,8 @@
 typedef struct CMS {
     size_t width;
     size_t depth;
-    uint32_t *array;
+    uint8_t num_use_bit;
+    uint8_t *array;
     size_t counter;
 } CMSketch;
 
@@ -28,7 +29,7 @@ typedef struct {
 } mergeParams;
 
 /* Creates a new Count-Min Sketch with dimensions of width * depth */
-CMSketch *NewCMSketch(size_t width, size_t depth);
+CMSketch *NewCMSketch(size_t width, size_t depth, uint64_t max);
 
 /*  Recommends width & depth for expected n different items,
     with probability of an error  - prob and over estimation

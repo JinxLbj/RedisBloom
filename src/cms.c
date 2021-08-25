@@ -4,6 +4,7 @@
 #include <stdlib.h> // malloc
 
 #include "cms.h"
+#include "bit/bit.h"
 #include "contrib/murmurhash2.h"
 
 #define min(a, b)                                                                                  \
@@ -13,20 +14,22 @@
         _a < _b ? _a : _b;                                                                         \
     })
 
-#define BIT64 64
 #define CMS_HASH(item, itemlen, i) MurmurHash2(item, itemlen, i)
 
-CMSketch *NewCMSketch(size_t width, size_t depth) {
+CMSketch *NewCMSketch(size_t width, size_t depth, uint64_t max) {
     assert(width > 0);
     assert(depth > 0);
-
+    assert(max > 0);
     CMSketch *cms = CMS_CALLOC(1, sizeof(CMSketch));
 
     cms->width = width;
     cms->depth = depth;
     cms->counter = 0;
-    cms->array = CMS_CALLOC(width * depth, sizeof(uint32_t));
+    u_int8_t min_pre_bit = get_min_need_bit(max);
+    cms->num_use_bit = min_pre_bit;
+    u_int64_t total_bits = width * depth * cms -> num_use_bit;
 
+    cms->array = CMS_CALLOC(total_bits % 8 != 0 ? total_bits / 8 + 1 : total_bits / 8, sizeof(uint8_t));
     return cms;
 }
 
@@ -51,12 +54,14 @@ size_t CMS_IncrBy(CMSketch *cms, const char *item, size_t itemlen, size_t value)
     assert(cms);
     assert(item);
 
-    size_t minCount = (size_t)-1;
+    size_t minCount = (size_t) -1;
 
     for (size_t i = 0; i < cms->depth; ++i) {
         uint32_t hash = CMS_HASH(item, itemlen, i);
-        cms->array[(hash % cms->width) + (i * cms->width)] += value;
-        minCount = min(minCount, cms->array[(hash % cms->width) + (i * cms->width)]);
+        uint32_t index = (hash % cms->width) + (i * cms->width);
+        uint64_t num = get_bit_num(cms, index);
+        set_bit_num(cms, index, num + value);
+        minCount = min(minCount, get_bit_num(cms, index));
     }
     cms->counter += value;
     return minCount;
@@ -66,15 +71,17 @@ size_t CMS_Query(CMSketch *cms, const char *item, size_t itemlen) {
     assert(cms);
     assert(item);
 
-    size_t minCount = (size_t)-1;
+    size_t minCount = (size_t) -1;
 
     for (size_t i = 0; i < cms->depth; ++i) {
         uint32_t hash = CMS_HASH(item, itemlen, i);
-        minCount = min(minCount, cms->array[(hash % cms->width) + (i * cms->width)]);
+        uint32_t index = (hash % cms->width) + (i * cms->width);
+        minCount = min(minCount, get_bit_num(cms, index));
     }
     return minCount;
 }
 
+//TODO
 void CMS_Merge(CMSketch *dest, size_t quantity, const CMSketch **src, const long long *weights) {
     assert(dest);
     assert(src);
@@ -89,9 +96,9 @@ void CMS_Merge(CMSketch *dest, size_t quantity, const CMSketch **src, const long
         for (size_t j = 0; j < width; ++j) {
             itemCount = 0;
             for (size_t k = 0; k < quantity; ++k) {
-                itemCount += src[k]->array[(i * width) + j] * weights[k];
+                itemCount += get_bit_num(src[k], (i * width) + j) * weights[k];
             }
-            dest->array[(i * width) + j] = itemCount;
+            set_bit_num(dest, (i * width) + j, itemCount);
         }
     }
 
