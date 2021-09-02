@@ -33,7 +33,7 @@ static int GetCMSKey(RedisModuleCtx *ctx, RedisModuleString *keyName, CMSketch *
 }
 
 static int parseCreateArgs(RedisModuleCtx *ctx, RedisModuleString **argv, int argc,
-                           long long *width, long long *depth) {
+                           long long *width, long long *depth, long long *max) {
 
     size_t cmdlen;
     const char *cmd = RedisModule_StringPtrLen(argv[0], &cmdlen);
@@ -56,18 +56,22 @@ static int parseCreateArgs(RedisModuleCtx *ctx, RedisModuleString **argv, int ar
         }
         CMS_DimFromProb(overEst, prob, (size_t *)width, (size_t *)depth);
     }
-
+    if (argc == 5) {
+        if ((RedisModule_StringToLongLong(argv[4], max) != REDISMODULE_OK) || *max < 1) {
+            INNER_ERROR("CMS: invalid max");
+        }
+    }
     return REDISMODULE_OK;
 }
 
 int CMSketch_Create(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
     RedisModule_AutoMemory(ctx);
-    if (argc != 4) {
+    if (argc != 4 && argc != 5) {
         return RedisModule_WrongArity(ctx);
     }
 
     CMSketch *cms = NULL;
-    long long width = 0, depth = 0;
+    long long width = 0, depth = 0, max_num = 0xffffffff;
     RedisModuleString *keyName = argv[1];
     RedisModuleKey *key = RedisModule_OpenKey(ctx, keyName, REDISMODULE_READ | REDISMODULE_WRITE);
 
@@ -76,10 +80,10 @@ int CMSketch_Create(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
         return RedisModule_ReplyWithError(ctx, "CMS: key already exists");
     }
 
-    if (parseCreateArgs(ctx, argv, argc, &width, &depth) != REDISMODULE_OK)
+    if (parseCreateArgs(ctx, argv, argc, &width, &depth, &max_num) != REDISMODULE_OK)
         return REDISMODULE_OK;
 
-    cms = NewCMSketch(width, depth);
+    cms = NewCMSketch(width, depth, max_num);
     RedisModule_ModuleTypeSetValue(key, CMSketchType, cms);
 
     RedisModule_CloseKey(key);
@@ -187,6 +191,7 @@ static int parseMergeArgs(RedisModuleCtx *ctx, RedisModuleString **argv, int arg
 
     size_t width = params->dest->width;
     size_t depth = params->dest->depth;
+    size_t byte = params->dest->byte;
 
     for (int i = 0; i < numKeys; ++i) {
         if (pos == -1) {
@@ -199,8 +204,9 @@ static int parseMergeArgs(RedisModuleCtx *ctx, RedisModuleString **argv, int arg
             REDISMODULE_OK) {
             return REDISMODULE_ERR;
         }
-        if (params->cmsArray[i]->width != width || params->cmsArray[i]->depth != depth) {
-            INNER_ERROR("CMS: width/depth is not equal");
+        if (params->cmsArray[i]->width != width || params->cmsArray[i]->depth != depth ||
+            params->cmsArray[i]->byte != byte) {
+            INNER_ERROR("CMS: width/depth/byte is not equal");
         }
     }
 
@@ -246,13 +252,15 @@ int CMSKetch_Info(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
         return REDISMODULE_OK;
     }
 
-    RedisModule_ReplyWithArray(ctx, 3 * 2);
+    RedisModule_ReplyWithArray(ctx, 4 * 2);
     RedisModule_ReplyWithSimpleString(ctx, "width");
     RedisModule_ReplyWithLongLong(ctx, cms->width);
     RedisModule_ReplyWithSimpleString(ctx, "depth");
     RedisModule_ReplyWithLongLong(ctx, cms->depth);
     RedisModule_ReplyWithSimpleString(ctx, "count");
     RedisModule_ReplyWithLongLong(ctx, cms->counter);
+    RedisModule_ReplyWithSimpleString(ctx, "byte");
+    RedisModule_ReplyWithLongLong(ctx, cms->byte);
 
     return REDISMODULE_OK;
 }
@@ -262,8 +270,8 @@ void CMSRdbSave(RedisModuleIO *io, void *obj) {
     RedisModule_SaveUnsigned(io, cms->width);
     RedisModule_SaveUnsigned(io, cms->depth);
     RedisModule_SaveUnsigned(io, cms->counter);
-    RedisModule_SaveStringBuffer(io, (const char *)cms->array,
-                                 cms->width * cms->depth * sizeof(uint32_t));
+    RedisModule_SaveUnsigned(io, cms->byte);
+    RedisModule_SaveStringBuffer(io, (const char *)cms->array, cms->width * cms->depth * cms->byte);
 }
 
 void *CMSRdbLoad(RedisModuleIO *io, int encver) {
@@ -275,8 +283,9 @@ void *CMSRdbLoad(RedisModuleIO *io, int encver) {
     cms->width = RedisModule_LoadUnsigned(io);
     cms->depth = RedisModule_LoadUnsigned(io);
     cms->counter = RedisModule_LoadUnsigned(io);
-    size_t length = cms->width * cms->depth * sizeof(size_t);
-    cms->array = (uint32_t *)RedisModule_LoadStringBuffer(io, &length);
+    cms->byte = RedisModule_LoadUnsigned(io);
+    size_t length = cms->width * cms->depth * cms->byte;
+    cms->array = (unsigned char *)RedisModule_LoadStringBuffer(io, &length);
 
     return cms;
 }
@@ -285,7 +294,7 @@ void CMSFree(void *value) { CMS_Destroy(value); }
 
 size_t CMSMemUsage(const void *value) {
     CMSketch *cms = (CMSketch *)value;
-    return sizeof(cms) + cms->width * cms->depth * sizeof(size_t);
+    return sizeof(cms) + cms->width * cms->depth * cms->byte;
 }
 
 int CMSModule_onLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {

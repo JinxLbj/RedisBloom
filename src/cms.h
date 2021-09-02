@@ -16,8 +16,9 @@
 typedef struct CMS {
     size_t width;
     size_t depth;
-    uint32_t *array;
+    uint8_t *array;
     size_t counter;
+    uint8_t byte;
 } CMSketch;
 
 typedef struct {
@@ -28,7 +29,7 @@ typedef struct {
 } mergeParams;
 
 /* Creates a new Count-Min Sketch with dimensions of width * depth */
-CMSketch *NewCMSketch(size_t width, size_t depth);
+CMSketch *NewCMSketch(size_t width, size_t depth, uint64_t max);
 
 /*  Recommends width & depth for expected n different items,
     with probability of an error  - prob and over estimation
@@ -50,6 +51,10 @@ size_t CMS_Query(CMSketch *cms, const char *item, size_t strlen);
 */
 void CMS_Merge(CMSketch *dest, size_t quantity, const CMSketch **src, const long long *weights);
 void CMS_MergeParams(mergeParams params);
+
+void CMS_INCR(CMSketch *cms, u_int64_t index, uint64_t delta);
+void CMS_SET(CMSketch *cms, u_int64_t index, uint64_t num);
+u_int64_t CMS_GET(const CMSketch *cms, u_int64_t index);
 
 /* Help function */
 void CMS_Print(const CMSketch *cms);
